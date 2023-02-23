@@ -1,0 +1,69 @@
+name: Repack talos ova
+on: 
+  push:
+    tags:
+    - 'v*.*.*'
+
+env:
+  OVFTOOL_VERSION: 4.5.0
+  OVF_ARCH: amd64
+  BASE_URL: https://github.com/siderolabs/talos/releases/download/
+  
+jobs:
+  Repack-Talos-ova:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout repo
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      # Install OVFtool
+      - name: Install ovftool
+        id: install_ovftool
+        shell: bash
+        run: |
+          cp bin/ovftool-$OVFTOOL_VERSION.zip /tmp/
+          unzip /tmp/ovftool-$OVFTOOL_VERSION.zip -d /tmp/
+          chmod +x /tmp/ovftool.bundle
+          sudo /tmp/ovftool.bundle --eulas-agreed
+
+      # Download ovf matching tag
+      - name: Download ovf
+        id: download_ovf
+        env:
+          TALOS_VERSION: 
+        shell: bash
+        run: |
+          wget $BASE_URL/$GITHUB_REF_NAME/vmware-$OVF_ARCH.ova
+          
+      # Extract OVF
+      - name: Extract ovf
+        id: extract_ovf
+        shell: bash
+        run: |
+          ovftool --allowExtraConfig --skipManifestCheck vmware-$OVF_ARCH.ova "unpacked.ovf"
+
+      # Modify OVF
+      - name: Modify ovf
+        id: modify_ovf
+        shell: bash
+        run: |
+          rm vmware-$OVF_ARCH.ova
+          sed -i 's/VmxNet3/E1000e/g' unpacked.ovf
+          sha256sum unpacked.ovf --tag > unpacked.mf
+          sha256sum unpacked-disk1.vmdk --tag >> unpacked.mf
+
+      # Repackage OVF
+      - name: Repackage ovf
+        id: repackage_ovf
+        shell: bash
+        run: |
+          ovftool --allowExtraConfig "unpacked.ovf" vmware-$OVF_ARCH.ova
+    
+      # Create new release from tag and attach ovf
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            vmware-${{ env.OVF_ARCH }}.ova
